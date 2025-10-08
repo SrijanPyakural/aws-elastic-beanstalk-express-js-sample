@@ -9,7 +9,7 @@ pipeline {
 
   environment {
     // EDIT ME: your Docker Hub repo "username/repo"
-    IMAGE_NAME = 'YOUR_DH_USERNAME/aws-elastic-beanstalk-express-js-sample'
+    IMAGE_NAME = 'srijanpyakural/aws-elastic-beanstalk-express-js-sample'
     IMAGE_TAG  = "build-${env.BUILD_NUMBER}"
   }
 
