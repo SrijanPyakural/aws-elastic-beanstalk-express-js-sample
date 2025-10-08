@@ -1,60 +1,44 @@
-// Jenkinsfile — Task 3: CI/CD + Security Gate
 pipeline {
-  agent none
-  options {
-    timestamps()
-  }
+  agent any
+  options { timestamps() }
+
   environment {
-    // ---- edit this to your Docker Hub repo ----
-    IMAGE_NAME = 'srijanpyakural/aws-elastic-beanstalk-express-js-sample'
+    IMAGE_NAME = 'YOUR_DH_USERNAME/aws-elastic-beanstalk-express-js-sample'  // <-- edit
     IMAGE_TAG  = "build-${env.BUILD_NUMBER}"
   }
 
   stages {
-    stage('Checkout') {
-      agent any
-      steps {
-        checkout scm
-      }
-    }
+    stage('Checkout') { steps { checkout scm } }
 
-    // Use Node 16 Docker image as the build agent (assignment requirement)
     stage('Install & Test (Node 16)') {
       agent {
-        docker { image 'node:16-alpine'; args '-u root:root' }
+        docker {
+          image 'node:16'                // Debian-based, more reliable than alpine
+          args '-u root:root'
+          reuseNode true
+        }
       }
       steps {
         sh 'node -v && npm -v'
-        // Assignment explicitly says npm install --save
-        sh 'npm install --save'
-        // If the sample app has no tests, don’t fail the whole build
+        sh 'if [ -f package-lock.json ]; then npm ci; else npm install --save; fi'
         sh 'npm test || echo "No unit tests found — continuing"'
-        // Keep workspace for later stages
         stash name: 'ws', includes: '**/*'
       }
     }
 
-    // Security in the pipeline: dependency vulnerability scan (fails on High/Critical)
     stage('Snyk Scan (fail on High/Critical)') {
-      agent {
-        docker { image 'node:16-alpine'; args '-u root:root' }
-      }
-      environment {
-        SNYK_TOKEN = credentials('snyk-token')   // Jenkins secret text credential
-      }
+      agent { docker { image 'node:16'; args '-u root:root'; reuseNode true } }
+      environment { SNYK_TOKEN = credentials('snyk-token') }
       steps {
         sh '''
           npm install -g snyk
           snyk auth "$SNYK_TOKEN"
-          # Fail build if any HIGH or CRITICAL found:
           snyk test --severity-threshold=high
         '''
       }
     }
 
-    // Build container image with the Jenkins controller's Docker CLI (DinD backend)
     stage('Build Image') {
-      agent any
       steps {
         unstash 'ws'
         sh 'docker build -t $IMAGE_NAME:$IMAGE_TAG .'
@@ -62,7 +46,6 @@ pipeline {
     }
 
     stage('Login & Push to Registry') {
-      agent any
       steps {
         withCredentials([usernamePassword(credentialsId: 'dockerhub-cred',
                                           usernameVariable: 'DOCKER_USER',
