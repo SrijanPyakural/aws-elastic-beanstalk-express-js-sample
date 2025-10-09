@@ -48,7 +48,7 @@ pipeline {
         // SNYK_API = 'https://api.au.snyk.io'
       }
       steps {
-        // POSIX-safe: no 'pipefail'. We preserve Snyk's exit code while still archiving logs.
+        // POSIX-safe (no pipefail). Preserve Snyk exit code but still archive logs.
         sh '''
           set -eu
 
@@ -114,7 +114,7 @@ pipeline {
 
   post {
     always {
-      # Record image digest (provenance), if available
+      // Record image digest (provenance), if available
       sh 'docker image inspect $IMAGE_NAME:$IMAGE_TAG --format=\'{{json .RepoDigests}}\' > image-digests.json || true'
       archiveArtifacts artifacts: '''
         Jenkinsfile,
