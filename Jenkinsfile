@@ -1,15 +1,14 @@
-// Jenkinsfile — Node 16 CI/CD + Snyk security gate + logging & retention
+// Jenkinsfile — Node 16 CI/CD + Snyk gate + logging & retention
 pipeline {
   agent any
   options {
     timestamps()
-    ansiColor('xterm')
     buildDiscarder(logRotator(numToKeepStr: '10', artifactNumToKeepStr: '10'))
   }
 
   environment {
-    // EDIT ME: your Docker Hub repo "username/repo"
-    IMAGE_NAME = 'srijanpyakural/aws-elastic-beanstalk-express-js-sample'
+    // EDIT: your Docker Hub repo (username/repo)
+    IMAGE_NAME = 'YOUR_DH_USERNAME/aws-elastic-beanstalk-express-js-sample'
     IMAGE_TAG  = "build-${env.BUILD_NUMBER}"
   }
 
@@ -44,37 +43,47 @@ pipeline {
       }
       environment {
         SNYK_TOKEN = credentials('snyk-token')   // Secret text credential
-        // If your Snyk region is EU/AU, set this globally in Jenkins:
+        // If your Snyk region is EU/AU, set this as a global Jenkins env:
         // SNYK_API = 'https://api.eu.snyk.io'
         // SNYK_API = 'https://api.au.snyk.io'
       }
       steps {
+        // POSIX-safe: no 'pipefail'. We preserve Snyk's exit code while still archiving logs.
         sh '''
-          set -euo pipefail
+          set -eu
+
           echo "Installing Snyk CLI…"
           npm install -g snyk >/dev/null 2>&1 || npm install -g snyk
           echo "Snyk CLI version: $(snyk --version)"
 
           # Non-interactive auth (no browser/device flow)
-          [ -n "${SNYK_TOKEN:-}" ] || { echo "ERROR: SNYK_TOKEN missing (credential id: snyk-token)"; exit 2; }
+          if [ -z "${SNYK_TOKEN:-}" ]; then
+            echo "ERROR: SNYK_TOKEN missing (credential id: snyk-token)"
+            exit 2
+          fi
           snyk config set api="$SNYK_TOKEN" >/dev/null
 
-          # Region hint (if provided)
           if [ -n "${SNYK_API:-}" ]; then
             echo "Using Snyk API endpoint: $SNYK_API"
           else
             echo "Using default Snyk API endpoint"
           fi
 
-          # Quick auth status (helpful diagnostics without leaking token)
-          if ! snyk auth --status; then
+          # Quick auth check (no secrets printed)
+          if ! snyk auth --status >/dev/null 2>&1; then
             echo "ERROR: Snyk auth failed (token/region)."
             exit 2
           fi
 
-          # Human-readable and machine-readable outputs
-          snyk test --severity-threshold=high 2>&1 | tee snyk.log
+          # Run the security test and capture its real exit code
+          snyk test --severity-threshold=high > snyk.log 2>&1
+          status=$?
+          cat snyk.log
+
+          # Also write a JSON report for artifacts (do not change build result)
           snyk test --severity-threshold=high --json-file-output=snyk-report.json || true
+
+          exit $status
         '''
       }
     }
@@ -92,7 +101,7 @@ pipeline {
                                           usernameVariable: 'DOCKER_USER',
                                           passwordVariable: 'DOCKER_PASS')]) {
           sh '''
-            set -eux
+            set -eu
             echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
             docker push $IMAGE_NAME:$IMAGE_TAG
             docker tag  $IMAGE_NAME:$IMAGE_TAG $IMAGE_NAME:latest
@@ -105,9 +114,8 @@ pipeline {
 
   post {
     always {
-      // Record image digest (provenance) if available
+      # Record image digest (provenance), if available
       sh 'docker image inspect $IMAGE_NAME:$IMAGE_TAG --format=\'{{json .RepoDigests}}\' > image-digests.json || true'
-
       archiveArtifacts artifacts: '''
         Jenkinsfile,
         Dockerfile,
